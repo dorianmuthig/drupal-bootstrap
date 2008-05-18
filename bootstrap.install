@@ -1,0 +1,11 @@
+<?php
+
+/**
+ * Make the module loaded first
+ */
+ 
+function bootstrap_install() {
+  // Set module weight for it to run before all modules
+  db_query("UPDATE {system} SET weight = -10000 WHERE name = 'bootstrap' AND type = 'module'");
+}
+?>
