@@ -1,0 +1,655 @@
+<?php
+
+/**
+ * @file
+ * Enables custom rule based bootstrap
+ */
+
+define(BOOTSTRAP_SUPER_ADMIN_NAME,'root admin');
+define(BOOTSTRAP_RULES_VARIABLE, 'bootstrap.rules');
+
+global $user;
+global $_modules;
+
+$roles=$user->roles;
+$roles[-1]=-1;
+
+$ml=module_list(1,0);
+
+unset($ml['bootstrap']);
+
+if($ml['i18n']){ //let it change $_GET['q']
+//	$time=microtime(1);
+    drupal_load('module', 'i18n');
+    module_invoke('i18n','init');
+   // $time=microtime(1)-$time;
+    //$total_load_time+=$time;
+    //$_modules[$m]=array('load time'=>round($time,3));
+    unset($ml['i18n']);
+}
+
+$path=$_GET['q'];
+
+$rs=_bootstrap_rules();
+if(count($rs)){
+	foreach($rs as $r){
+		if($r->path_match){
+	          $path = drupal_get_path_alias($_GET['q']);
+	          $regexp =_bootstrap_path_regexp($r->path_match);
+	          	//echo "regexp: $regexp <br>"; 
+	          // Compare with the internal and path alias (if any).
+	          $path_matched = preg_match($regexp, $path);
+	          if ($path != $_GET['q']) {
+	            $path_matched = $path_matched || preg_match($regexp, $_GET['q']);
+	          }
+			
+		}else{
+			$path_matched=1;	
+		}
+		if($path_matched and
+		(count($r->roles)==0 or count(array_intersect(array_keys($roles),array_keys($r->roles))))
+		){
+			if($r->access=='deny'){
+				_bootstrap_module_load('system');
+				_bootstrap_module_load('filter');
+				_bootstrap_module_load('node');
+				_bootstrap_module_load('user');
+				_bootstrap_module_load('block');
+				drupal_access_denied();
+				exit();
+			}
+			if(0){
+				echo "rule matched <pre>";
+				print_r($r);
+				echo "</pre>";	
+			}
+		}else{
+			if($r->access=='restrict'){
+				_bootstrap_module_load('system');
+				_bootstrap_module_load('filter');
+				_bootstrap_module_load('node');
+				_bootstrap_module_load('user');
+				_bootstrap_module_load('block');
+				drupal_access_denied();
+				exit();
+			}
+		}
+	}
+}
+
+$ms=_bootstrap_module_rules();
+
+
+if(0){
+echo "<pre>";
+print_r($ms);
+}
+
+
+
+
+
+  foreach ($ml as $m) {
+  	$load=1;
+		
+	if($rs=$ms[$m]){
+		foreach($rs as $r){
+			if(0){
+				echo $m.'<br>';
+				echo 'path ('.$r->path_match.'): ' . (empty($r->path_match) or preg_match('/'.$r->path_match.'/',$path)).'<br>';
+				echo "roles: ".(count($r->roles)==0 or count(array_intersect(array_keys($roles),array_keys($r->roles)))).'<br>';
+			}
+			//print_r($r->modules[$m]->action);
+			if($r->path_match){
+		          $path = drupal_get_path_alias($_GET['q']);
+		          $regexp = '/^('. preg_replace(
+		          	array('/(\r\n?|\n)/', '/\*/', '/(^|\|)<front>($|\|)/'), 
+		          	array('|', '.*', '\1'. preg_quote(variable_get('site_frontpage', 'node'), '/') .'\2'), 
+		          	str_replace('/','\/',trim($r->path_match))) .')$/';
+		          	//echo "regexp: $regexp <br>"; 
+		          // Compare with the internal and path alias (if any).
+		          $path_matched = preg_match($regexp, $path);
+		          if ($path != $_GET['q']) {
+		            $path_matched = $path_matched || preg_match($regexp, $_GET['q']);
+		          }
+				
+			}else{
+				$path_matched=1;	
+			}
+			if($path_matched and
+			(count($r->roles)==0 or count(array_intersect(array_keys($roles),array_keys($r->roles))))
+			){
+				
+				$load=$r->modules[$m]->action=='load';
+				
+				break;
+			}else{
+				
+				$load=$r->modules[$m]->action=='skip';	
+				
+			}
+		}
+	}
+  	 
+	if($load){
+  	 $time=microtime(1);
+  	 //echo "loading $m<br>";
+    drupal_load('module', $m);
+    $time=microtime(1)-$time;
+    $total_load_time+=$time;
+    $_modules[$m]=array('load time'=>round($time,3));
+		
+	}
+  }
+  
+  //module_list(FALSE, FALSE, FALSE, array_keys($_modules));
+ 
+  $_modules['Summary']=array(
+  	'load time'=>round($total_load_time,3)
+  );
+  
+  global $locale;
+  
+  // Initialize the localization system.  Depends on i18n.module being loaded already.
+  $locale = locale_initialize();
+  
+  // Let all modules take action before menu system handles the reqest
+  module_invoke_all('init'); //TODO i18n & bootstrap already called, exclude them
+  
+  $time=microtime(1);
+  
+  	global $_menu;
+	menu_get_menu();
+	
+	
+	$ps=_bootstrap_path_rules();
+	
+	if(count($ps)){
+		$mps=array();
+		foreach($ps as $k=>$p){
+			if(!in_array($p->access, array('restrict','deny'))) continue;
+			
+			$mps=preg_grep(
+				_bootstrap_path_regexp($p->path_match),
+				array_keys($_menu['path index']
+				)
+			);
+			//print_r($mps);
+			if(count($mps)) foreach($mps as $mp){
+				$pi=$_menu['path index'][$mp];
+				//$_menu['items'][$pi]['access']=0;
+				unset($_menu['items'][$pi]);
+			}
+		}	
+	}
+	
+	//print_r($_menu);
+
+  
+  
+	$return = menu_execute_active_handler();
+	//echo "executing: ".round(microtime(1)-$time,3);
+	$_modules['Execution']=array('load time'=> round(microtime(1)-$time,3));
+	
+	// Menu status constants are integers; page content is a string.
+	if (is_int($return)) {
+	  switch ($return) {
+	    case MENU_NOT_FOUND:
+	      drupal_not_found();
+	      break;
+	    case MENU_ACCESS_DENIED:
+	      drupal_access_denied();
+	      break;
+	    case MENU_SITE_OFFLINE:
+	      drupal_site_offline();
+	      break;
+	  }
+	}
+	elseif (isset($return)) {
+	  // Print any value (including an empty string) except NULL or undefined:
+	  if($returncontent) {
+	  		echo $return;
+	  		exit();
+	  	}
+	  print theme('page', $return);
+	
+	}
+	
+	drupal_page_footer();
+	
+	exit();
+	
+
+function bootstrap_admin_form_submit($form_id,$r){
+
+	mdump($_POST);
+
+	$r=(object)$r;
+	if(count($r->modules)){
+		foreach($r->modules as $k=>$v){
+			if($v!='ignore'){
+				$ms[$k]=(object)array('action'=>$v);
+			}	
+		}
+		
+		$r->modules=$ms;
+	}else{
+		unset($r->modules);
+	}
+	if(count($r->roles)){
+		foreach($r->roles as $rid){
+			if($rid){
+				$rs[$rid]=(object)array('id'=>$rid);	
+			}	
+		}
+		unset($r->roles);
+		if(count($rs)){
+			$r->roles=$rs;
+		}
+	}else{
+		unset($r->roles);
+	}
+	
+	$rid=$r->id;
+	mdump($r);
+	unset($r->id,$r->op,$r->submit,$r->form_id,$r->form_token);
+	
+	$rs=_bootstrap_rules();
+	
+	if(isset($rid)){
+		$rs[$rid]=$r;
+	}else{
+		$rs[]=$r;
+	}
+	
+	_bootstrap_rules_save($rs);
+	
+	 menu_rebuild();
+    node_types_rebuild();
+     //unfortunately we need that to load modules on precached menus, content types, etc.
+	
+}
+
+function _bootstrap_objectify($array){
+	
+}
+
+function _bootstrap_rules($objectify=false){
+	static $rs,$rso;
+	if(!isset($rs)){
+		$rs=variable_get(BOOTSTRAP_RULES_VARIABLE,array());
+		foreach($rs as $r){
+			$o[]=$r;	
+		}
+		$rs=$o;
+		$rso=_bootstrap_objectify($rs);
+	}
+	if($objectify){
+		return $rso;
+	}
+	return $rs;
+}
+
+
+
+function _bootstrap_module_rules($objectify=false){
+	$rs=_bootstrap_rules($objectify);
+	$ms=array();
+	if(count($rs)){
+		foreach($rs as $r){
+			if(count($r->modules)){
+				foreach($r->modules as $k=>$v){
+					$ms[$k][]=$r;
+				}	
+			}
+		}
+	}
+	return $ms;
+}
+
+function _bootstrap_path_rules($objectify=false){
+	$rs=_bootstrap_rules($objectify);
+	$ms=array();
+	if(count($rs)){
+		foreach($rs as $r){
+			if($r->path_match){
+				$ms[]=$r;
+			}
+		}
+	}
+	return $ms;
+
+}
+
+function bootstrap_admin_form($rid=NULL){
+	$f['#redirect']='admin/build/bootstrap';
+	
+	if($rid!==NULL){
+		$f['id']=array(
+			'#type'=>"hidden",
+			'#value'=>$rid,
+		);	
+		$rs=_bootstrap_rules();
+		$d=$rs[$rid];
+		mdump($d);
+	}
+	
+	$f['path_settings']=array(
+		'#type'=>'fieldset',
+		'#title'=>'Page specific settings'
+	);
+
+	$f['path_settings']['path_match']=array(
+		'#type'=>'textarea',
+		'#rows'=>5,
+		'#title'=>t('Path'),
+		'#description'=>t('Perl-compatible PHP regular expression'),
+		'#default_value'=>$d->path_match,
+	   	'#description'=>t("Enter one page per line as Drupal paths. The '*' character is a wildcard. Example paths are %blog for the blog page and %blog-wildcard for every personal blog. %front is the front page.", array('%blog' => 'blog', '%blog-wildcard' => 'blog/*', '%front' => '<front>')),
+	);
+	
+	$rs=db_query("select * from {role} order by name");
+	$os=array();
+	$os[-1]=t(BOOTSTRAP_SUPER_ADMIN_NAME);
+	while($r=db_fetch_object($rs)){
+		$os[$r->rid]=$r->name;	
+	}
+	
+	$f['role_settings']=array(
+		'#type'=>'fieldset',
+		'#title'=>'User specific settings'
+	);
+	
+	$f['role_settings']['roles']=array(
+		'#type'=>'checkboxes',
+		'#title'=>t('Roles'),
+		'#options'=>$os,
+		'#default_value'=>$d && count($d->roles) ? array_keys($d->roles) : array(),
+	);
+	
+	$f['access_settings']=array(
+		'#type'=>'fieldset',
+		'#title'=>t('Access'),
+		'access'=>array(
+			'#type'=>'radios',
+			'#options'=>array(''=>t('Ignore rules'),'restrict'=>t('Restrict to matching rules'),'deny'=>t('Deny')),
+			'#default_value'=>$d->access,
+		),
+	);
+	
+	$f['modules']=array(
+		'#type'=>'fieldset',
+		'#title'=>t('Modules'),
+		'#tree'=>1,
+		'#attributes'=>array('class'=>'cranky-bootstrap-module-list'),
+		'#theme'=>'bootstrap_admin_form_modules',
+	);
+	
+	$rs=db_query("select * from {system} where type='module' and status=1 order by name");
+	
+	while($r=db_fetch_object($rs)){
+		
+		$default_value=($m=$d->modules[$r->name])?$m->action:'ignore';
+
+		$f['modules'][$r->name]=array(
+			'#type'=>'radios',
+			'#title'=>$r->name,
+			'#options'=>array('ignore'=>t(''),'load'=>t(''),'skip'=>t('')),
+			'#default_value'=>$default_value,
+			
+		);
+	}
+
+	
+	$f['submit']=array(
+		'#type'=>'submit',
+		'#value'=>t('Add rule')
+	);
+	return $f;
+}
+
+function theme_bootstrap_admin_form_modules($rs){
+	//mdump($r);
+	
+	foreach($rs as $k=>$r){
+		if($k[0]=='#') continue;
+		$rows[]=array(
+			l($r['#title'],'admin/build/bootstrap/moduleinfo/'.$r['#title']),
+			drupal_render($r['ignore']),
+			drupal_render($r['load']),
+			drupal_render($r['skip']),
+		);
+	}
+	
+	$header=array(t('module'),t('~'),t('load'),t('skip'));
+	
+	
+	return "<div style='height:30em;overflow:auto;float:left;'>".theme('table', $header,$rows)."<div style='clear:both'></div></div>";
+}
+
+function bootstrap_admin_rules(){
+	
+	$rs=db_query("select * from {role}");
+	while($r=db_fetch_object($rs)){
+		$roles[$r->rid]=$r->name;	
+	}
+	$roles[-1]=t(BOOTSTRAP_SUPER_ADMIN_NAME);
+	
+	$rs=_bootstrap_rules();
+	
+	$o='';
+	
+	if(!count($rs)){
+		drupal_set_message(t('No bootstrap rules defined.'));	
+		return '';
+	}	
+	$header=array(t('up'),t('down'),t('edit'),t('path'),t('roles'),t('access'),t('modules'),t('delete'));
+	$i=0;
+	
+	
+	foreach($rs as $r){
+		$rls=array();
+		if(count($r->roles)){
+			foreach($r->roles as $k=>$v){
+				$rls[]=$roles[$k];	
+			}	
+		}else{
+			$rls=array();	
+		}
+		
+		$mrs=array();
+		
+		if(count($r->modules)){
+			foreach($r->modules as $k=>$v){
+				$mrs[]=($v->action=='load'?'+':'-').$k;
+			}	
+		}
+		
+		$rows[]=array(
+			$i?
+			l(t('up'),'admin/build/bootstrap/rule/order/'.$i.'/'.($i-1)):'',
+			$i==count($rs)-1?'':l(t('down'),'admin/build/bootstrap/rule/order/'.$i.'/'.($i+1)),
+			l(t('edit'),'admin/build/bootstrap/rule/'.$i),
+			
+			($r->path_use_regexp?'[regexp] ':'').htmlentities(str_replace("\r\n", ", ", $r->path_match)),
+			join(', ',$rls),
+			$r->access,
+			join(', ',$mrs),
+			l(t('[x]'),'admin/build/bootstrap/rule/delete/'.$i),
+		);
+		$i++;
+	}
+	return theme('table',$header,$rows);
+}
+
+
+/**
+ * Implementation of hook_menu().
+ */
+function bootstrap_menu($may_cache) {
+  global $user;
+  global $_modules;
+  
+  $items = array();
+  
+  if($may_cache){
+		//loading all cached menus for modules involved in the rules.
+		$ms=array_keys(_bootstrap_module_rules());
+		
+		foreach($ms as $m){
+			if(
+				!isset($_modules[$m])// we need to load this one and call menu_hook 
+				&& module_exists($m)// we need only enabled modules
+			){ 
+				drupal_load('module',$m);
+				module_invoke($m,'init');
+				if($r=module_invoke($m,'menu',1)){
+					$items=array_merge($items,$r);
+				}
+			}
+		}
+  }
+  
+
+  if (!$may_cache) {
+		$items[]=array(
+			'path'=>'admin/build/bootstrap/add',
+			'title'=>t('add rule'),
+			'callback'=>'drupal_get_form',
+			'callback arguments'=>array('bootstrap_admin_form'),
+			'type'=>MENU_LOCAL_TASK,
+		);
+		$items[]=array(
+			'path'=>'admin/build/bootstrap',
+			'title'=>t('Bootstrap'),
+			'callback'=>'bootstrap_admin_rules'
+		);
+		
+		$items[]=array(
+			'path'=>'admin/build/bootstrap/list',
+			'title'=>t('rules'),
+			'callback'=>'bootstrap_admin_rules',
+			'type'=>MENU_DEFAULT_LOCAL_TASK,
+			'weight'=>-1
+		);	
+		$items[]=array(
+			'path'=>'admin/build/bootstrap/rule',
+			'title'=>t('edit'),
+			'callback'=>'drupal_get_form',
+			'callback arguments'=>array('bootstrap_admin_form',arg(4)),
+			'type'=>(arg(0).arg(1).arg(2).arg(3)=='adminbuildbootstraprule')?MENU_LOCAL_TASK:MENU_CALLBACK,			
+			
+		);		
+		$items[]=array(
+			'path'=>'admin/build/bootstrap/rule/delete',
+			'title'=>t('Delete'),
+			'callback'=>'bootstrap_admin_rule_delete',
+			'callback arguments'=>array(arg(5)),
+			'type'=>MENU_CALLBACK,			
+		);						
+
+		$items[]=array(
+			'path'=>'admin/build/bootstrap/rule/order',
+			'callback'=>'bootstrap_admin_rule_order',
+			'callback arguments'=>array(arg(5),arg(6)),
+			'type'=>MENU_CALLBACK,			
+		);						
+		
+		$items[]=array(
+			'path'=>'admin/build/bootstrap/moduleinfo',
+			'callback'=>'bootstrap_module_info',
+			'callback arguments'=>array(arg(4)),
+			'type'=>MENU_CALLBACK,
+		);
+  }
+
+  return $items;
+}
+
+function _bootstrap_rules_save($rs){
+	variable_set(BOOTSTRAP_RULES_VARIABLE,$rs);	
+}
+
+function bootstrap_admin_rule_delete($rid){
+
+	$rs=_bootstrap_rules();
+	unset($rs[$rid]);
+	_bootstrap_rules_save($rs);	
+	drupal_goto('admin/build/bootstrap');
+}
+
+function bootstrap_admin_rule_order($rid,$pos){
+
+	$rs=_bootstrap_rules();
+	$i=$rs[$rid];
+	unset($rs[$rid]);
+	array_splice($rs,$pos,0,array($i));
+	//mdump($rs);
+	_bootstrap_rules_save($rs);	
+	drupal_goto('admin/build/bootstrap');
+}
+
+function bootstrap_block($op = 'list', $delta = 0) {
+  global $user;
+  if ($op == 'list') {
+    $block[0]['info'] = t('Loaded modules');
+    return $block;
+  }
+  else if ($op == 'view') {
+    if ($user->uid==1 or 1) {
+    	global $_modules;
+      
+      if(!count($_modules)) return '';
+      foreach($_modules as $k=>$m){
+      		$rows[]=array($k,$m['load time']);
+      	}
+    	$h=array(t('module'),t('load time'));
+    	$o.=theme('table',$h,$rows);
+    	$o.=l(t('rules'),'admin/build/bootstrap');
+    	$o.=' ';
+    	$o.=l(t('add'),'admin/build/bootstrap/add');
+    	
+      $block['content'] = $o;
+      $block['subject'] = t('Loaded modules');
+      return $block;
+    }
+  }
+}
+
+function bootstrap_module_info($m){
+	
+	$o="$m module information:<br><pre>";
+	
+	
+	drupal_load('module',$m);
+	$items_cached=module_invoke($m,'menu',1);
+	$items_dynamic=module_invoke($m,'menu',0);
+	
+	ob_start();
+	
+	print_r($items_cached);
+	print_r($items_dynamic);
+	
+	$o.=ob_get_contents();
+	ob_end_clean();
+	
+	//mdump($items_cached);
+	//mdump($items_dynamic);
+	
+	return $o;
+}
+
+function _bootstrap_module_load($m){
+	global $_modules;
+	if(!$_modules[$m]){
+		drupal_load('module',$m);
+		module_invoke($m, 'init');	
+	}
+}
+
+function _bootstrap_path_regexp($string){
+ return '/^('. preg_replace(
+	          	array('/(\r\n?|\n)/', '/\*/', '/(^|\|)<front>($|\|)/'), 
+	          	array('|', '.*', '\1'. preg_quote(variable_get('site_frontpage', 'node'), '/') .'\2'), 
+	          	str_replace('/','\/',trim($string))) .')$/';
+}

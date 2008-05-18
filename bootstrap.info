@@ -1,0 +1,6 @@
+name = Bootstrap
+description = Enables custom rule based bootstrap
+package = Other
+version = "5.7-1.x-dev"
+project = "drupal"
+
