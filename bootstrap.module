@@ -165,7 +165,7 @@ foreach ($ml as $m) {
 
 function bootstrap_admin_form_submit($form_id,$r){
 
-	mdump($_POST);
+	//mdump($_POST);
 
 	$r=(object)$r;
 	if(count($r->modules)){
@@ -368,7 +368,6 @@ function theme_bootstrap_admin_form_modules($rs){
 function bootstrap_admin_rules(){
 	
 //	$files = module_rebuild_cache();
-	mdump($files);
 	
 	$rs=db_query("select * from {role}");
 	while($r=db_fetch_object($rs)){
