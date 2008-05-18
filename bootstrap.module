@@ -54,7 +54,6 @@ if(count($rs)){
 		if($match){ // a match! we need to apply rules
 			//access rules first
 			if($r->access=='deny' && $user->uid !=1){
-				echo "access denying<br>";
 				if($r->path_match) $access_rules[]=$r;
 				_bootstrap_access_denied();
 			}
@@ -63,23 +62,18 @@ if(count($rs)){
 			}
 			$os=array();
 			if(count($r->modules)) foreach($r->modules as $k=>$m){
-				if($m->action=='skip'){
-					//echo "skipping $k<br>";
-					$os[$k]=$k;
-				}
+				$os[$k]=$m->action;
 			}
 			$ms=array_merge($os,$ms /* dont let rules overwrite the prev ones */);	
 		}else{ //we need to check access restrictions
 			if($r->access=='restrict' && $user->uid !=1){
-				echo "access restriction<br>";
 				if($r->path_match) $access_rules[]=$r;
 				_bootstrap_access_denied();
 			}
 			$os=array();
 			if(count($r->modules)) foreach($r->modules as $k=>$m){
 				if($m->action=='load'){
-					//echo "skipping $k<br>";
-					$os[$k]=$k;
+					$os[$k]='skip';
 				}
 			}
 			$ms=array_merge($os,$ms /* dont let rules overwrite the prev ones */);	
@@ -87,36 +81,16 @@ if(count($rs)){
 	}
 }
 
-$path=$_GET['q'];
-
-//$ms=_bootstrap_module_rules();
-
-
-if(0){
-echo "<pre>";
-print_r($ms);
-}
-
-
-  foreach ($ml as $m) {
-  	$load=1;
-	if($ms[$m]){
-		$load=0;
-	}
-  	 
-	if($load){
+foreach ($ml as $m) {
+	if(!$ms[$m] or $ms[$m]=='load'){
 	    $time=microtime(1);
-	  	 //echo "loading $m<br>";
 	    drupal_load('module', $m);
 	    $time=microtime(1)-$time;
 	    $total_load_time+=$time;
 	    $_modules[$m]=array('load time'=>round($time,3));
-		
 	}
-  }
-  
-  //module_list(FALSE, FALSE, FALSE, array_keys($_modules));
- 
+}
+
   $_modules['Summary']=array(
   	'load time'=>round($total_load_time,3)
   );
