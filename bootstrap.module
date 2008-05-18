@@ -6,7 +6,7 @@
  */
 
 define(BOOTSTRAP_SUPER_ADMIN_NAME,'root admin');
-define(BOOTSTRAP_RULES_VARIABLE, 'bootstrap.rules');
+define(BOOTSTRAP_RULES_VARIABLE,'bootstrap.rules');
 
 global $user;
 global $_modules;
@@ -222,7 +222,7 @@ print_r($ms);
 
 function bootstrap_admin_form_submit($form_id,$r){
 
-	mdump($_POST);
+	//mdump($_POST);
 
 	$r=(object)$r;
 	if(count($r->modules)){
@@ -251,7 +251,7 @@ function bootstrap_admin_form_submit($form_id,$r){
 	}
 	
 	$rid=$r->id;
-	mdump($r);
+//	mdump($r);
 	unset($r->id,$r->op,$r->submit,$r->form_id,$r->form_token);
 	
 	$rs=_bootstrap_rules();
@@ -331,7 +331,7 @@ function bootstrap_admin_form($rid=NULL){
 		);	
 		$rs=_bootstrap_rules();
 		$d=$rs[$rid];
-		mdump($d);
+		//mdump($d);
 	}
 	
 	$f['path_settings']=array(
