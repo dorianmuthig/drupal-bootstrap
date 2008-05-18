@@ -14,70 +14,82 @@ global $_modules;
 $roles=$user->roles;
 $roles[-1]=-1;
 
-$ml=module_list(1,0);
+$ml=module_list(1,0); //system enabled module list
 
-unset($ml['bootstrap']);
+unset($ml['bootstrap']); //already loaded
 
 if($ml['i18n']){ //let it change $_GET['q']
-//	$time=microtime(1);
-    drupal_load('module', 'i18n');
-    module_invoke('i18n','init');
-   // $time=microtime(1)-$time;
-    //$total_load_time+=$time;
-    //$_modules[$m]=array('load time'=>round($time,3));
-    unset($ml['i18n']);
+	_bootstrap_module_load('i18n');
+	unset($ml['i18n']);
 }
 
-$path=$_GET['q'];
-
 $rs=_bootstrap_rules();
+$ms=array();
+
 if(count($rs)){
 	foreach($rs as $r){
-		if($r->path_match){
-	          $path = drupal_get_path_alias($_GET['q']);
-	          $regexp =_bootstrap_path_regexp($r->path_match);
-	          	//echo "regexp: $regexp <br>"; 
-	          // Compare with the internal and path alias (if any).
-	          $path_matched = preg_match($regexp, $path);
-	          if ($path != $_GET['q']) {
-	            $path_matched = $path_matched || preg_match($regexp, $_GET['q']);
-	          }
-			
-		}else{
-			$path_matched=1;	
+		$match=0;
+		while(1){ //to enable breaks
+			if($r->path_match){ //path conditions are present
+				$path = drupal_get_path_alias($_GET['q']);
+				$regexp =_bootstrap_path_regexp($r->path_match);
+				//echo "regexp: $regexp <br>"; 
+				// Compare with the internal and path alias (if any).
+				$path_matched = preg_match($regexp, $path);
+				if ($path != $_GET['q']) {
+					$path_matched = $path_matched || preg_match($regexp, $_GET['q']);
+				}
+				if(!$path_matched) break;//skipping other conditions
+				$match=1;
+			}
+			if(count($r->roles)){//role conditions are present
+				if(!count(array_intersect(array_keys($roles),array_keys($r->roles)))){
+					$match=0;//removing the prev match if any
+					break;//skipping other conditions
+				}
+				$match=1;
+			}
+			break;
 		}
-		if($path_matched and
-		(count($r->roles)==0 or count(array_intersect(array_keys($roles),array_keys($r->roles))))
-		){
-			if($r->access=='deny'){
-				_bootstrap_module_load('system');
-				_bootstrap_module_load('filter');
-				_bootstrap_module_load('node');
-				_bootstrap_module_load('user');
-				_bootstrap_module_load('block');
-				drupal_access_denied();
-				exit();
+		if($match){ // a match! we need to apply rules
+			//access rules first
+			if($r->access=='deny' && $user->uid !=1){
+				echo "access denying<br>";
+				if($r->path_match) $access_rules[]=$r;
+				_bootstrap_access_denied();
 			}
-			if(0){
-				echo "rule matched <pre>";
-				print_r($r);
-				echo "</pre>";	
+			foreach($r->modules as $k=>$m){
+				//if($m->action=='skip') $skipped_modules[]=$m;
 			}
-		}else{
-			if($r->access=='restrict'){
-				_bootstrap_module_load('system');
-				_bootstrap_module_load('filter');
-				_bootstrap_module_load('node');
-				_bootstrap_module_load('user');
-				_bootstrap_module_load('block');
-				drupal_access_denied();
-				exit();
+			$os=array();
+			if(count($r->modules)) foreach($r->modules as $k=>$m){
+				if($m->action=='skip'){
+					//echo "skipping $k<br>";
+					$os[$k]=$k;
+				}
 			}
+			$ms=array_merge($os,$ms /* dont let rules overwrite the prev ones */);	
+		}else{ //we need to check access restrictions
+			if($r->access=='restrict' && $user->uid !=1){
+				echo "access restriction<br>";
+				if($r->path_match) $access_rules[]=$r;
+				_bootstrap_access_denied();
+			}
+			$os=array();
+			if(count($r->modules)) foreach($r->modules as $k=>$m){
+				if($m->action=='load'){
+					//echo "skipping $k<br>";
+					$os[$k]=$k;
+				}
+			}
+			$ms=array_merge($os,$ms /* dont let rules overwrite the prev ones */);	
 		}
 	}
 }
 
-$ms=_bootstrap_module_rules();
+$path=$_GET['q'];
+
+//$ms=_bootstrap_module_rules();
 
 
 if(0){
@@ -86,58 +98,19 @@ print_r($ms);
 }
 
 
-
-
-
   foreach ($ml as $m) {
   	$load=1;
-		
-	if($rs=$ms[$m]){
-		foreach($rs as $r){
-			if(0){
-				echo $m.'<br>';
-				echo 'path ('.$r->path_match.'): ' . (empty($r->path_match) or preg_match('/'.$r->path_match.'/',$path)).'<br>';
-				echo "roles: ".(count($r->roles)==0 or count(array_intersect(array_keys($roles),array_keys($r->roles)))).'<br>';
-			}
-			//print_r($r->modules[$m]->action);
-			if($r->path_match){
-		          $path = drupal_get_path_alias($_GET['q']);
-		          $regexp = '/^('. preg_replace(
-		          	array('/(\r\n?|\n)/', '/\*/', '/(^|\|)<front>($|\|)/'), 
-		          	array('|', '.*', '\1'. preg_quote(variable_get('site_frontpage', 'node'), '/') .'\2'), 
-		          	str_replace('/','\/',trim($r->path_match))) .')$/';
-		          	//echo "regexp: $regexp <br>"; 
-		          // Compare with the internal and path alias (if any).
-		          $path_matched = preg_match($regexp, $path);
-		          if ($path != $_GET['q']) {
-		            $path_matched = $path_matched || preg_match($regexp, $_GET['q']);
-		          }
-				
-			}else{
-				$path_matched=1;	
-			}
-			if($path_matched and
-			(count($r->roles)==0 or count(array_intersect(array_keys($roles),array_keys($r->roles))))
-			){
-				
-				$load=$r->modules[$m]->action=='load';
-				
-				break;
-			}else{
-				
-				$load=$r->modules[$m]->action=='skip';	
-				
-			}
-		}
+	if($ms[$m]){
+		$load=0;
 	}
   	 
 	if($load){
-  	 $time=microtime(1);
-  	 //echo "loading $m<br>";
-    drupal_load('module', $m);
-    $time=microtime(1)-$time;
-    $total_load_time+=$time;
-    $_modules[$m]=array('load time'=>round($time,3));
+	    $time=microtime(1);
+	  	 //echo "loading $m<br>";
+	    drupal_load('module', $m);
+	    $time=microtime(1)-$time;
+	    $total_load_time+=$time;
+	    $_modules[$m]=array('load time'=>round($time,3));
 		
 	}
   }
@@ -158,19 +131,15 @@ print_r($ms);
   
   $time=microtime(1);
   
+  
   	global $_menu;
 	menu_get_menu();
 	
-	
-	$ps=_bootstrap_path_rules();
-	
-	if(count($ps)){
+	if(count($access_rules)){
 		$mps=array();
-		foreach($ps as $k=>$p){
-			if(!in_array($p->access, array('restrict','deny'))) continue;
-			
+		foreach($access_rules as $r){
 			$mps=preg_grep(
-				_bootstrap_path_regexp($p->path_match),
+				_bootstrap_path_regexp($r->path_match),
 				array_keys($_menu['path index']
 				)
 			);
@@ -222,7 +191,7 @@ print_r($ms);
 
 function bootstrap_admin_form_submit($form_id,$r){
 
-	//mdump($_POST);
+	mdump($_POST);
 
 	$r=(object)$r;
 	if(count($r->modules)){
@@ -274,26 +243,22 @@ function _bootstrap_objectify($array){
 	
 }
 
-function _bootstrap_rules($objectify=false){
-	static $rs,$rso;
+function _bootstrap_rules(){
+	static $rs;
 	if(!isset($rs)){
 		$rs=variable_get(BOOTSTRAP_RULES_VARIABLE,array());
 		foreach($rs as $r){
-			$o[]=$r;	
+			if(!count($r->modules)) $r->modules=array();
+			if(!count($r->roles)) $r->roles=array(); 
+			$os[]=$r;	
 		}
-		$rs=$o;
-		$rso=_bootstrap_objectify($rs);
-	}
-	if($objectify){
-		return $rso;
+		$rs=$os;
 	}
 	return $rs;
 }
 
-
-
-function _bootstrap_module_rules($objectify=false){
-	$rs=_bootstrap_rules($objectify);
+function _bootstrap_module_rules(){
+	$rs=_bootstrap_rules();
 	$ms=array();
 	if(count($rs)){
 		foreach($rs as $r){
@@ -307,8 +272,8 @@ function _bootstrap_module_rules($objectify=false){
 	return $ms;
 }
 
-function _bootstrap_path_rules($objectify=false){
-	$rs=_bootstrap_rules($objectify);
+function _bootstrap_path_rules(){
+	$rs=_bootstrap_rules();
 	$ms=array();
 	if(count($rs)){
 		foreach($rs as $r){
@@ -318,7 +283,6 @@ function _bootstrap_path_rules($objectify=false){
 		}
 	}
 	return $ms;
-
 }
 
 function bootstrap_admin_form($rid=NULL){
@@ -428,6 +392,9 @@ function theme_bootstrap_admin_form_modules($rs){
 }
 
 function bootstrap_admin_rules(){
+	
+//	$files = module_rebuild_cache();
+	mdump($files);
 	
 	$rs=db_query("select * from {role}");
 	while($r=db_fetch_object($rs)){
@@ -567,7 +534,12 @@ function bootstrap_menu($may_cache) {
 }
 
 function _bootstrap_rules_save($rs){
-	variable_set(BOOTSTRAP_RULES_VARIABLE,$rs);	
+	foreach($rs as $r){
+		if(!count($r->modules)) unset($r->modules);
+		if(!count($r->roles)) unset($r->roles);
+		$os[]=$r;	
+	}
+	variable_set(BOOTSTRAP_RULES_VARIABLE,$os);	
 }
 
 function bootstrap_admin_rule_delete($rid){
@@ -642,8 +614,11 @@ function bootstrap_module_info($m){
 function _bootstrap_module_load($m){
 	global $_modules;
 	if(!$_modules[$m]){
+		$time=microtime(1);
 		drupal_load('module',$m);
-		module_invoke($m, 'init');	
+		module_invoke($m, 'init');
+		$time=round(microtime(1)-$time,3);
+		$_modules[$m]=array('load time'=>$time);
 	}
 }
 
@@ -652,4 +627,14 @@ function _bootstrap_path_regexp($string){
 	          	array('/(\r\n?|\n)/', '/\*/', '/(^|\|)<front>($|\|)/'), 
 	          	array('|', '.*', '\1'. preg_quote(variable_get('site_frontpage', 'node'), '/') .'\2'), 
 	          	str_replace('/','\/',trim($string))) .')$/';
+}
+
+function _bootstrap_access_denied(){
+	_bootstrap_module_load('system');
+	_bootstrap_module_load('filter');
+	_bootstrap_module_load('node');
+	_bootstrap_module_load('user');
+	_bootstrap_module_load('block');
+	drupal_access_denied();
+	exit();	
 }
