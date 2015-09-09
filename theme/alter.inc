@@ -46,6 +46,32 @@ function bootstrap_css_alter(&$css) {
       'weight' => -1,
     );
   }
+  else
+  {
+	$cdn = $theme_path.'/css/bootstrap.min.css';
+    $css[$cdn] = array(
+      'data' => $cdn,
+      'type' => 'file',
+      'every_page' => TRUE,
+      'media' => 'all',
+      'preprocess' => FALSE,
+      'group' => CSS_THEME,
+      'browsers' => array('IE' => TRUE, '!IE' => TRUE),
+      'weight' => -2,
+    );
+    // Add overrides.
+    $override = $theme_path . '/css/overrides.css';
+    $css[$override] = array(
+      'data' => $override,
+      'type' => 'file',
+      'every_page' => TRUE,
+      'media' => 'all',
+      'preprocess' => TRUE,
+      'group' => CSS_THEME,
+      'browsers' => array('IE' => TRUE, '!IE' => TRUE),
+      'weight' => -1,
+    );
+  }
   if (!empty($excludes)) {
     $css = array_diff_key($css, drupal_map_assoc($excludes));
   }
@@ -237,6 +263,15 @@ function bootstrap_js_alter(&$js) {
     $js[$cdn]['type'] = 'external';
     $js[$cdn]['every_page'] = TRUE;
     $js[$cdn]['weight'] = -100;
+  }
+  else
+  {
+	  $cdn = $theme_path. '/js/bootstrap.min.js';
+      $js[$cdn] = drupal_js_defaults();
+      $js[$cdn]['data'] = $cdn;
+      $js[$cdn]['type'] = 'file';
+      $js[$cdn]['every_page'] = TRUE;
+      $js[$cdn]['weight'] = -100;
   }
 }
 
